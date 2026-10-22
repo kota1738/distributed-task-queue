@@ -132,7 +132,7 @@ pytest                        # SQLite + in-process fake Redis, no services need
 ruff check . && ruff format --check .
 ```
 
-The suite runs the same 64 tests in two configurations:
+The suite runs the same 68 tests in two configurations:
 
 | Configuration | Database | Redis |
 | --- | --- | --- |
