@@ -80,8 +80,10 @@ def main() -> int:
                 "/api/v1/jobs", json={"type": name, "payload": payload}, headers=headers
             )
             submitted[name] = response.json()
-            print(f"  {name:<10} -> 201 Created, job {submitted[name]['id'][:8]},"
-                  f" status={submitted[name]['status']}")
+            print(
+                f"  {name:<10} -> 201 Created, job {submitted[name]['id'][:8]},"
+                f" status={submitted[name]['status']}"
+            )
 
         rule("5. Validation happens at submission, not in the worker")
         bad = client.post(
