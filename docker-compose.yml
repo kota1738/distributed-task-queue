@@ -64,6 +64,10 @@ services:
     command: ["python", "-m", "app.worker"]
     environment: *app-env
     mem_limit: 128m
+    # The image healthcheck probes the API's HTTP port, which a worker does not
+    # serve; without this the container reports unhealthy while working fine.
+    healthcheck:
+      disable: true
     deploy:
       replicas: 2
     depends_on:
