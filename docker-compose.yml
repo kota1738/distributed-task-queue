@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: taskqueue
+      POSTGRES_PASSWORD: taskqueue
+      POSTGRES_DB: taskqueue
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskqueue -d taskqueue"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Redis is only a wake-up channel; job state lives in Postgres, so
+    # persistence is switched off here.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command:
+      - sh
+      - -c
+      - python -m app.cli init-db && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment: &app-env
+      DATABASE_URL: postgresql+psycopg://taskqueue:taskqueue@postgres:5432/taskqueue
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-me}
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
+      DEFAULT_MAX_ATTEMPTS: ${DEFAULT_MAX_ATTEMPTS:-3}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment: *app-env
+    deploy:
+      replicas: 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
