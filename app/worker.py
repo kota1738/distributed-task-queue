@@ -14,13 +14,14 @@ from __future__ import annotations
 import logging
 import signal
 import threading
+import time
 import uuid
 from datetime import timedelta
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from app import handlers
+from app import handlers, metrics
 from app.broker import Broker
 from app.config import Settings
 from app.handlers import JobContext, JobExecutionError, PermanentJobError
@@ -133,6 +134,7 @@ class Worker:
             return None
         job = session.get(Job, claimed)
         if job is not None:
+            metrics.record_claim(job.type, job.attempts)
             logger.info(
                 "%s: claimed job %s (%s) attempt %s/%s",
                 self.worker_id,
@@ -146,11 +148,18 @@ class Worker:
     # --------------------------------------------------------------- process
     def process(self, job: Job) -> None:
         ctx = JobContext(job_id=job.id, attempt=job.attempts, max_attempts=job.max_attempts)
+        started = time.monotonic()
         try:
             job_type = handlers.get_job_type(job.type)
             result = job_type.handler(dict(job.payload or {}), ctx)
         except PermanentJobError as exc:
-            self._finish(job.id, JobStatus.failed, error=f"permanent failure: {exc}")
+            self._finish(
+                job.id,
+                JobStatus.failed,
+                error=f"permanent failure: {exc}",
+                started=started,
+                job_type=job.type,
+            )
         except JobExecutionError as exc:
             self._retry_or_fail(job, str(exc))
         except Exception as exc:  # noqa: BLE001 - handler bugs must not kill the worker
@@ -159,12 +168,15 @@ class Worker:
         else:
             if not isinstance(result, dict):
                 result = {"result": result}
-            self._finish(job.id, JobStatus.succeeded, result=result)
+            self._finish(
+                job.id, JobStatus.succeeded, result=result, started=started, job_type=job.type
+            )
 
     def _retry_or_fail(self, job: Job, error: str) -> None:
         if job.attempts >= job.max_attempts:
-            self._finish(job.id, JobStatus.failed, error=error)
+            self._finish(job.id, JobStatus.failed, error=error, job_type=job.type)
             return
+        metrics.record_retry(job.type)
         delay = min(
             self.settings.retry_base_delay_seconds * (2 ** (job.attempts - 1)),
             self.settings.retry_max_delay_seconds,
@@ -197,6 +209,8 @@ class Worker:
         *,
         result: dict | None = None,
         error: str | None = None,
+        started: float | None = None,
+        job_type: str | None = None,
     ) -> None:
         now = utcnow()
         with self.session_factory() as session:
@@ -212,6 +226,8 @@ class Worker:
                 )
             )
             session.commit()
+        if job_type is not None:
+            metrics.record_finished(job_type, status.value, started)
         logger.info("%s: job %s -> %s", self.worker_id, job_id, status.value)
 
     # ------------------------------------------------------- crash recovery

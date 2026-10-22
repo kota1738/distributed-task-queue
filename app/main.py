@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from sqlalchemy import Engine
 
-from app import __version__
+from app import __version__, metrics
 from app.broker import Broker
 from app.config import Settings, get_settings
 from app.db import create_db_engine, create_session_factory, init_models
@@ -43,6 +43,7 @@ def create_app(
         init_models(db_engine)
         app.state.engine = db_engine
         app.state.session_factory = create_session_factory(db_engine)
+        metrics.bind_session_factory(app.state.session_factory)
         app.state.broker = broker or Broker(
             app_settings.redis_url,
             app_settings.queue_name,

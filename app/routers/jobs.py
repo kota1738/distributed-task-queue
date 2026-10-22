@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import handlers
+from app import handlers, metrics
 from app.broker import Broker
 from app.deps import BrokerDep, CurrentUser, SessionDep, SettingsDep
 from app.handlers import PermanentJobError
@@ -113,6 +113,7 @@ def submit_job(
     session.refresh(job)
 
     response.headers["Location"] = f"/jobs/{job.id}"
+    metrics.record_submitted(job.type)
     notify_safely(broker, job.id)
     return job
 

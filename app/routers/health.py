@@ -5,13 +5,21 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Response, status
+from prometheus_client import CONTENT_TYPE_LATEST
 from sqlalchemy import text
 
+from app import metrics
 from app.deps import BrokerDep, SessionDep
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
+
+
+@router.get("/metrics", include_in_schema=False)
+def prometheus_metrics() -> Response:
+    """Prometheus scrape endpoint. Unauthenticated, like the other probes."""
+    return Response(content=metrics.render(), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/healthz")
