@@ -7,8 +7,10 @@ services:
       POSTGRES_DB: taskqueue
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Loopback only: nothing outside this host needs the database socket.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taskqueue -d taskqueue"]
       interval: 5s
@@ -21,7 +23,8 @@ services:
     # persistence is switched off here.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    mem_limit: 64m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -41,8 +44,15 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-dev}
       WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-1.0}
       DEFAULT_MAX_ATTEMPTS: ${DEFAULT_MAX_ATTEMPTS:-3}
+    # Published on loopback for curl and an SSH tunnel; Prometheus scrapes this
+    # container directly over the shared monitoring network instead.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    mem_limit: 256m
+    networks:
+      default: {}
+      monitoring:
+        aliases: [taskqueue-api]
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,6 +63,7 @@ services:
     build: .
     command: ["python", "-m", "app.worker"]
     environment: *app-env
+    mem_limit: 128m
     deploy:
       replicas: 2
     depends_on:
@@ -60,6 +71,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+networks:
+  # Created by the monitoring stack (docker-compose.yml there sets name:
+  # monitoring). Joining it lets Prometheus scrape this API by service name.
+  monitoring:
+    external: true
+    name: monitoring_default
 
 volumes:
   pgdata:

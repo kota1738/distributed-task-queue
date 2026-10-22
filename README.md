@@ -52,6 +52,52 @@ the database for due jobs anyway.
 See [`docs/architecture.md`](docs/architecture.md) for the request lifecycle,
 data model and failure handling.
 
+![Prometheus scraping the deployed API](docs/screenshots/prometheus-target.png)
+
+## Deploy to a server
+
+This stack is deployed on the same host as [monitoring-stack](../monitoring-stack),
+which scrapes it:
+
+```bash
+./deploy.sh                  # kota@server:~/distributed-task-queue
+```
+
+Three parts of `docker-compose.yml` exist for that deployment:
+
+- **Loopback ports.** `8000`, `5432` and `6379` are published on `127.0.0.1`
+  only, so nothing is reachable from the LAN. Prometheus reaches the API over a
+  Docker network rather than through the host.
+- **A shared external network.** The API joins `monitoring_default` with the
+  alias `taskqueue-api`, which is why the scrape target is `taskqueue-api:8000`.
+  Bring the monitoring stack up first, or the build fails on the missing network.
+- **Memory limits on every service** (256 MB API, 128 MB per worker, 256 MB
+  Postgres, 64 MB Redis) so the queue cannot crowd out the services beside it.
+
+Set `ENVIRONMENT=prod` and a real `JWT_SECRET` in `.env` on the server: the app
+refuses to start in production with the default secret.
+
+### Verified on the server
+
+Fresh deployment, driven by hand rather than assumed:
+
+```text
+$ curl -s localhost:8000/healthz
+{"status":"ok"} [200]
+$ curl -s localhost:8000/readyz
+{"status":"ok","checks":{"database":"ok","broker":"ok"}} [200]
+
+$ curl -s -X POST localhost:8000/api/v1/jobs \
+    -d '{"type":"math.sum","payload":{"numbers":[1,2,3.5]}}'
+{"id":"e3365fa2-...","type":"math.sum","status":"queued","attempts":0,...}
+
+$ curl -s localhost:8000/api/v1/jobs/<id>
+{...,"status":"succeeded","attempts":1,"result":{"sum":6.5,"count":3},...}
+```
+
+Two workers were running; the job was claimed and finished in 0.9 s, and
+Prometheus scrapes the API as `up` with an 8 ms duration.
+
 ## Quick start (Docker Compose)
 
 ```bash
@@ -131,6 +177,16 @@ worker.
 pytest                        # SQLite + in-process fake Redis, no services needed
 ruff check . && ruff format --check .
 ```
+
+Current run:
+
+```text
+$ pytest -q
+68 passed, 1 skipped, 329 warnings in 43.40s
+```
+
+The skip is the Postgres-only race test (`SKIP LOCKED` semantics), which CI runs
+against a real database.
 
 The suite runs the same 68 tests in two configurations:
 
