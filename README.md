@@ -83,6 +83,15 @@ python -m app.worker                 # terminal 2: worker
 
 ## Walking through the API
 
+To watch the whole lifecycle without installing anything, run the demo — it
+boots the real app, worker and database, and prints each step:
+
+```bash
+python scripts/demo.py
+```
+
+Or drive it by hand:
+
 ```bash
 TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/token \
   -H 'Content-Type: application/json' \
